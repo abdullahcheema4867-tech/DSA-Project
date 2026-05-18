@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <chrono>
 #include <cmath>
+#include <climits>
 
 TSPSolver::TSPSolver(Graph* g) : graph(g)
 {
@@ -150,6 +151,7 @@ TSPResult TSPSolver::solveGreedyNearestNeighbor()
         int nearestCity = -1;
         int minDistance = INT_MAX;
 
+        // FIX: Check that distance > 0 (valid edge exists)
         for (int j = 0; j < numCities; j++) {
             if (!visited[j] && distance[currentCity][j] > 0 &&
                 distance[currentCity][j] < minDistance) {
@@ -159,7 +161,20 @@ TSPResult TSPSolver::solveGreedyNearestNeighbor()
         }
 
         if (nearestCity == -1) {
-            // If no unvisited city with edge found, pick any unvisited
+            // If no unvisited city with valid edge found, 
+            // try to pick any unvisited city with valid edge
+            for (int j = 0; j < numCities; j++) {
+                if (!visited[j] && distance[currentCity][j] > 0) {
+                    nearestCity = j;
+                    break;
+                }
+            }
+        }
+
+        // SAFETY: If still no city found (incomplete graph), 
+        // this indicates disconnected graph
+        if (nearestCity == -1) {
+            // Pick any unvisited city (graph is disconnected)
             for (int j = 0; j < numCities; j++) {
                 if (!visited[j]) {
                     nearestCity = j;
@@ -200,7 +215,7 @@ TSPResult TSPSolver::solveNearestInsertion()
     pathSize = 1;
 
     if (numCities > 1) {
-        // Find nearest city to city 0
+        // Find nearest city to city 0 with valid edge (distance > 0)
         int nearestToZero = -1;
         int minDist = INT_MAX;
         for (int j = 1; j < numCities; j++) {
@@ -209,7 +224,9 @@ TSPResult TSPSolver::solveNearestInsertion()
                 nearestToZero = j;
             }
         }
-        if (nearestToZero == -1) nearestToZero = 1;
+        if (nearestToZero == -1) {
+            nearestToZero = 1;  // Fallback
+        }
 
         path[1] = nearestToZero;
         inPath[nearestToZero] = true;
