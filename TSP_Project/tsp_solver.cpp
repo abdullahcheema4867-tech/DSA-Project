@@ -74,16 +74,29 @@ bool TSPSolver::isValidPath(int* path, int pathLength)
         }
         visited[path[i]] = true;
     }
+    
+    // CRITICAL: Verify ALL edges in path exist (distance > 0)
+    for (int i = 0; i < pathLength; i++) {
+        int fromCity = path[i];
+        int toCity = path[(i + 1) % pathLength];
+        if (distance[fromCity][toCity] == 0) {
+            return false;  // Edge doesn't exist!
+        }
+    }
+    
     return true;
 }
 
 void TSPSolver::permute(int* path, int l, int r, int& bestCost, int* bestPath)
 {
     if (l == r) {
-        int cost = calculatePathDistance(path, numCities);
-        if (cost < bestCost) {
-            bestCost = cost;
-            copyPath(path, bestPath, numCities);
+        // CRITICAL: Check if path is valid (all edges exist)
+        if (isValidPath(path, numCities)) {
+            int cost = calculatePathDistance(path, numCities);
+            if (cost < bestCost) {
+                bestCost = cost;
+                copyPath(path, bestPath, numCities);
+            }
         }
     } else {
         for (int i = l; i <= r; i++) {
@@ -121,8 +134,16 @@ TSPResult TSPSolver::solveBruteForce()
     // Generate all permutations starting from city 0
     permute(path, 1, numCities - 1, bestCost, bestPath);
 
-    copyPath(bestPath, result.path, numCities);
-    result.totalDistance = bestCost;
+    if (bestCost == INT_MAX) {
+        // No valid path found (graph is disconnected)
+        result.totalDistance = -1;  // Error indicator
+        for (int i = 0; i < numCities; i++) {
+            result.path[i] = i;
+        }
+    } else {
+        copyPath(bestPath, result.path, numCities);
+        result.totalDistance = bestCost;
+    }
 
     auto end = std::chrono::high_resolution_clock::now();
     result.executionTime = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
@@ -151,7 +172,7 @@ TSPResult TSPSolver::solveGreedyNearestNeighbor()
         int nearestCity = -1;
         int minDistance = INT_MAX;
 
-        // FIX: Check that distance > 0 (valid edge exists)
+        // CRITICAL: Only consider cities with VALID edges (distance > 0)
         for (int j = 0; j < numCities; j++) {
             if (!visited[j] && distance[currentCity][j] > 0 &&
                 distance[currentCity][j] < minDistance) {
@@ -160,27 +181,16 @@ TSPResult TSPSolver::solveGreedyNearestNeighbor()
             }
         }
 
+        // If no valid edge found, graph is disconnected - ERROR
         if (nearestCity == -1) {
-            // If no unvisited city with valid edge found, 
-            // try to pick any unvisited city with valid edge
-            for (int j = 0; j < numCities; j++) {
-                if (!visited[j] && distance[currentCity][j] > 0) {
-                    nearestCity = j;
-                    break;
-                }
+            result.totalDistance = -1;  // Error indicator
+            for (int k = 0; k < numCities; k++) {
+                result.path[k] = k;
             }
-        }
-
-        // SAFETY: If still no city found (incomplete graph), 
-        // this indicates disconnected graph
-        if (nearestCity == -1) {
-            // Pick any unvisited city (graph is disconnected)
-            for (int j = 0; j < numCities; j++) {
-                if (!visited[j]) {
-                    nearestCity = j;
-                    break;
-                }
-            }
+            auto end = std::chrono::high_resolution_clock::now();
+            result.executionTime = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+            result.memoryUsed = sizeof(result);
+            return result;  // Exit early
         }
 
         path[i] = nearestCity;
@@ -215,7 +225,7 @@ TSPResult TSPSolver::solveNearestInsertion()
     pathSize = 1;
 
     if (numCities > 1) {
-        // Find nearest city to city 0 with valid edge (distance > 0)
+        // Find nearest city to city 0 WITH VALID EDGE (distance > 0)
         int nearestToZero = -1;
         int minDist = INT_MAX;
         for (int j = 1; j < numCities; j++) {
@@ -224,8 +234,17 @@ TSPResult TSPSolver::solveNearestInsertion()
                 nearestToZero = j;
             }
         }
+        
         if (nearestToZero == -1) {
-            nearestToZero = 1;  // Fallback
+            // No valid edge from city 0 - graph is disconnected
+            result.totalDistance = -1;
+            for (int k = 0; k < numCities; k++) {
+                result.path[k] = k;
+            }
+            auto end = std::chrono::high_resolution_clock::now();
+            result.executionTime = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+            result.memoryUsed = sizeof(result);
+            return result;
         }
 
         path[1] = nearestToZero;
@@ -239,14 +258,22 @@ TSPResult TSPSolver::solveNearestInsertion()
         int bestPosition = -1;
         int minIncrease = INT_MAX;
 
-        // Find nearest city not in path
+        // Find city not in path with best insertion position
         for (int i = 0; i < numCities; i++) {
             if (!inPath[i]) {
                 // Find best position to insert this city
                 for (int j = 0; j < pathSize; j++) {
                     int nextJ = (j + 1) % pathSize;
-                    int increase = distance[path[j]][i] + distance[i][path[nextJ]] -
-                                   distance[path[j]][path[nextJ]];
+                    int cityA = path[j];
+                    int cityB = path[nextJ];
+                    
+                    // CRITICAL: Check if edges exist
+                    if (distance[cityA][i] == 0 || distance[i][cityB] == 0) {
+                        continue;  // Skip invalid edges
+                    }
+                    
+                    int increase = distance[cityA][i] + distance[i][cityB] -
+                                   distance[cityA][cityB];
 
                     if (increase < minIncrease) {
                         minIncrease = increase;
@@ -258,14 +285,15 @@ TSPResult TSPSolver::solveNearestInsertion()
         }
 
         if (bestCity == -1) {
-            // If no city found, just add the first unvisited
-            for (int i = 0; i < numCities; i++) {
-                if (!inPath[i]) {
-                    bestCity = i;
-                    bestPosition = pathSize;
-                    break;
-                }
+            // No valid insertion found - graph is disconnected
+            result.totalDistance = -1;
+            for (int k = 0; k < numCities; k++) {
+                result.path[k] = k;
             }
+            auto end = std::chrono::high_resolution_clock::now();
+            result.executionTime = std::chrono::duration_cast<std::chrono::microseconds>(end - start).count();
+            result.memoryUsed = sizeof(result);
+            return result;
         }
 
         // Insert bestCity at bestPosition
